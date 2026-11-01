@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111316">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>Take Recorder</title>
+<style>
+  :root {
+    --bg: #111316; --panel: #1b1e23; --line: #2c3038; --text: #e8e8e8; --muted: #8a9099;
+    --green: #2ecc71; --red: #e74c3c; --amber: #f39c12; --blue: #3498db; --grey: #555b66;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0 12px 0 0; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--green); color: #000; border: 0; font-weight: 600; }
+  button.danger { background: var(--red); color: #fff; border: 0; }
+  #folderName, #stats { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 50px); }
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; height: auto; }
+    #stage { height: 62vh; }
+    aside { border-left: 0; }
+  }
+
+  #stage { position: relative; background: #000; overflow: hidden; min-height: 300px; }
+  #preview { width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); }
+  #banner { position: absolute; top: 0; left: 0; right: 0; padding: 14px 20px; font-size: clamp(26px, 5vw, 64px); font-weight: 800; letter-spacing: .5px; background: var(--grey); color: #fff; opacity: .92; }
+  #banner small { display: block; font-size: .38em; font-weight: 500; opacity: .9; }
+  #banner.armed { background: var(--green); color: #000; }
+  #banner.recording { background: var(--red); }
+  #banner.pending { background: var(--amber); color: #000; }
+  #banner.paused { background: var(--blue); }
+  #gesture { position: absolute; left: 20px; bottom: 20px; font-size: 64px; display: flex; align-items: center; gap: 12px; }
+  #gesture .bar { width: 160px; height: 10px; background: #fff3; border-radius: 5px; overflow: hidden; }
+  #gesture .bar div { height: 100%; background: #fff; width: 0; }
+  #gstatus { position: absolute; left: 20px; bottom: 6px; font-size: 12px; color: #fffa; }
+  #meter { position: absolute; right: 16px; top: 120px; bottom: 20px; width: 18px; background: #fff2; border-radius: 4px; }
+  #level { position: absolute; bottom: 0; left: 0; right: 0; background: var(--green); border-radius: 4px; }
+  #thr { position: absolute; left: -6px; right: -6px; height: 2px; background: var(--amber); }
+  #toast { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); background: #000c; padding: 10px 18px; border-radius: 8px; font-size: 20px; opacity: 0; transition: opacity .3s; pointer-events: none; white-space: nowrap; }
+  #toast.show { opacity: 1; }
+
+  aside { background: var(--panel); border-left: 1px solid var(--line); padding: 12px 16px; overflow-y: auto; }
+  aside h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 8px 0; }
+  .takes { list-style: none; padding: 0; margin: 0 0 10px; }
+  .takes li { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .takes li .n { font-weight: 700; min-width: 36px; }
+  .takes li .info { flex: 1; font-size: 13px; color: var(--muted); }
+  .takes li.discarded { opacity: .4; text-decoration: line-through; }
+  .takes li button { padding: 4px 9px; }
+  .star { color: var(--amber); }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); }
+  label { display: block; margin: 10px 0 2px; font-size: 13px; color: var(--muted); }
+  select, input[type=number] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  input[type=range] { width: 100%; }
+  .help { font-size: 13px; color: var(--muted); }
+  .help td { padding: 2px 6px 2px 0; vertical-align: top; }
+
+  .overlay { position: fixed; inset: 0; background: var(--bg); z-index: 10; overflow-y: auto; padding: 12px 16px; }
+  .overlay .head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .overlay .head h2 { margin: 0; flex: 1; font-size: 20px; }
+  .sess { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .sess .shead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .sess .shead b { flex: 1; }
+  #player { display: flex; flex-direction: column; gap: 8px; }
+  #playVideo { width: 100%; max-height: 85vh; background: #000; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎙 Take Recorder</h1>
+  <button id="btnStart" class="primary">Start session</button>
+  <button id="btnLib">📂 Library</button>
+  <button id="btnFolder" hidden>Choose folder…</button>
+  <span id="folderName"></span>
+  <span style="flex:1"></span>
+  <span id="stats"></span>
+</header>
+<main>
+  <section id="stage">
+    <video id="preview" autoplay muted playsinline></video>
+    <div id="banner">Press “Start session”<small>one click, then hands-free</small></div>
+    <div id="meter"><div id="level"></div><div id="thr"></div></div>
+    <div id="gesture"></div>
+    <div id="gstatus"></div>
+    <div id="toast"></div>
+  </section>
+  <aside>
+    <h2>This session</h2>
+    <ul id="takes" class="takes"></ul>
+    <button id="btnPurge" class="danger">Delete all unstarred</button>
+
+    <details open>
+      <summary>Controls</summary>
+      <table class="help">
+        <tr><td>👍 hold</td><td>Mark last take ★ best (saves it now)</td></tr>
+        <tr><td>👎 hold</td><td>Discard last take · while recording, hold 1.5 s to cancel</td></tr>
+        <tr><td>✋ hold 1 s</td><td>Pause / resume listening (tuning, talking)</td></tr>
+        <tr><td>Pedal / keys</td><td>→ PgDn Enter = ★ · ← PgUp Del = discard · P = pause</td></tr>
+      </table>
+      <p class="help">No action = the take is kept after the decision window.</p>
+    </details>
+
+    <details>
+      <summary>Settings</summary>
+      <label>Camera</label><select id="camId" data-key="camId"></select>
+      <label>Microphone</label><select id="micId" data-key="micId"></select>
+      <label>Video quality</label>
+      <select id="quality" data-key="quality">
+        <option value="480">480p (≈1 Mbps)</option>
+        <option value="720">720p (≈2.5 Mbps)</option>
+        <option value="1080">1080p (≈5 Mbps)</option>
+      </select>
+      <label>Start threshold: <b id="thrVal"></b> dBFS</label>
+      <input type="range" min="-75" max="-10" step="1" data-key="thresholdDb">
+      <button id="btnCal">Calibrate (stay silent 3 s)</button>
+      <label>Silence that ends a take (s)</label><input type="number" min="1" max="30" step="0.5" data-key="silenceSec">
+      <label>Pre-roll (s): you get between this and 2×</label><input type="number" min="1" max="15" step="1" data-key="prerollSec">
+      <label>Minimum take, playing time (s)</label><input type="number" min="0" max="120" step="1" data-key="minTakeSec">
+      <label>Decision window (s)</label><input type="number" min="1" max="30" step="1" data-key="decideSec">
+      <label><input type="checkbox" data-key="gestures"> Gesture control</label>
+      <p class="help" id="fmt"></p>
+    </details>
+  </aside>
+</main>
+
+<div id="library" class="overlay" hidden>
+  <div class="head"><h2>📂 Library</h2><span id="usage" class="help"></span><button id="btnLibClose">Close</button></div>
+  <div id="libList"></div>
+</div>
+<div id="player" class="overlay" hidden>
+  <div class="head"><h2 id="playTitle"></h2><button id="btnPlayClose">Close</button></div>
+  <video id="playVideo" controls playsinline></video>
+</div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+
+// ---------- settings ----------
+const DEFAULTS = { thresholdDb: -45, silenceSec: 5, prerollSec: 4, minTakeSec: 10, decideSec: 4,
+                   quality: '720', gestures: true, camId: '', micId: '' };
+const S = { ...DEFAULTS };
+try { Object.assign(S, JSON.parse(localStorage.getItem('takeRecorder') || '{}')); } catch {}
+const saveSettings = () => { try { localStorage.setItem('takeRecorder', JSON.stringify(S)); } catch {} };
+
+const VBR = { '480': 1_000_000, '720': 2_500_000, '1080': 5_000_000 };
+const SIZE = { '480': [854, 480], '720': [1280, 720], '1080': [1920, 1080] };
+const MIMES = ['video/mp4;codecs=avc1.42E01F,mp4a.40.2', 'video/mp4;codecs=avc1,opus', 'video/mp4',
+               'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+const mime = MIMES.find(m => MediaRecorder.isTypeSupported(m)) || '';
+const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+const typeOf = name => name.endsWith('.mp4') ? 'video/mp4' : 'video/webm';
+$('fmt').textContent = `Recording format: ${mime || 'browser default'}`;
+
+// ---------- state ----------
+let stream = null, audioCtx = null, srcNode = null, analyser = null, buf = null;
+let mode = 'idle';            // idle | armed | paused | recording
+let segs = [];                // rolling pre-roll recorders while armed
+let active = null;            // { seg, trigger, lastLoud }
+let pending = null;           // { take, deadline }
+let takes = [], lastTake = null, takeNo = 0;
+let root = null, rootPicked = false, sessDir = null, sessionStamp = '';
+let levelDb = -100, aboveSince = 0;
+let wakeLock = null;
+
+// ---------- storage ----------
+// Each session is a folder named with its start timestamp, inside either a folder the user
+// picked (desktop) or the app's private storage (phone / default).
+const SESSION_RE = /^\d{8}_\d{6}$/;
+
+async function getRoot() {
+  if (root) return root;
+  if (!navigator.storage?.getDirectory) return null;
+  const opfs = await navigator.storage.getDirectory();
+  root = await opfs.getDirectoryHandle('takes', { create: true });
+  try { await navigator.storage.persist?.(); } catch {}
+  return root;
+}
+const showRoot = () => { $('folderName').textContent = rootPicked ? '📁 ' + root.name : '💾 app storage'; };
+
+if (window.showDirectoryPicker) $('btnFolder').hidden = false;
+$('btnFolder').onclick = async () => {
+  try {
+    root = await showDirectoryPicker({ id: 'takes', mode: 'readwrite', startIn: 'videos' });
+    rootPicked = true;
+    sessDir = null;
+    showRoot();
+  } catch {}
+};
+
+// ---------- media ----------
+async function openStream() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  const [w, h] = SIZE[S.quality];
+  const video = { width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30 } };
+  // music, not a call: no echo cancellation / noise suppression / auto gain
+  const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+                  channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 } };
+  if (S.camId) video.deviceId = { exact: S.camId };
+  else video.facingMode = 'user';   // phone: front camera, so the screen faces the player
+  if (S.micId) audio.deviceId = { exact: S.micId };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video, audio });
+  } catch (e) {
+    if (e.name !== 'OverconstrainedError' && e.name !== 'NotFoundError') throw e;
+    delete video.deviceId; delete audio.deviceId; S.camId = S.micId = '';
+    stream = await navigator.mediaDevices.getUserMedia({ video, audio });
+  }
+  $('preview').srcObject = stream;
+  audioCtx ??= new AudioContext();
+  srcNode?.disconnect();
+  srcNode = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  buf = new Float32Array(analyser.fftSize);
+  srcNode.connect(analyser);
+  await listDevices();
+}
+
+async function listDevices() {
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  const fill = (sel, kind, track) => {
+    const cur = track?.getSettings().deviceId;
+    sel.innerHTML = devs.filter(d => d.kind === kind)
+      .map(d => `<option value="${d.deviceId}" ${d.deviceId === cur ? 'selected' : ''}>${d.label || kind}</option>`).join('');
+  };
+  fill($('camId'), 'videoinput', stream.getVideoTracks()[0]);
+  fill($('micId'), 'audioinput', stream.getAudioTracks()[0]);
+}
+
+// A rolling recorder. A new one starts every pre-roll period and at most two live at once,
+// so when sound arrives the oldest one already holds P..2P seconds of lead-in.
+class Seg {
+  constructor() {
+    this.t0 = performance.now();
+    this.chunks = [];
+    this.dropped = false;
+    this.rec = new MediaRecorder(stream, { mimeType: mime || undefined,
+      videoBitsPerSecond: VBR[S.quality], audioBitsPerSecond: 192_000 });
+    this.rec.ondataavailable = e => { if (!this.dropped && e.data.size) this.chunks.push(e.data); };
+    this.done = new Promise(r => { this.rec.onstop = r; });
+    this.rec.start(1000);
+  }
+  stop() { if (this.rec.state !== 'inactive') this.rec.stop(); return this.done; }
+  drop() { this.dropped = true; this.chunks = []; this.stop(); }
+}
+
+function rotate(now) {
+  const newest = segs[segs.length - 1];
+  if (!newest || now - newest.t0 >= S.prerollSec * 1000) segs.push(new Seg());
+  while (segs.length > 2) segs.shift().drop();
+}
+const dropSegs = () => { segs.forEach(s => s.drop()); segs = []; };
+
+// ---------- take lifecycle ----------
+function startTake(now) {
+  if (pending) commit(pending.take);
+  const seg = segs.shift();
+  dropSegs();
+  active = { seg, trigger: now, lastLoud: now };
+  mode = 'recording';
+  aboveSince = 0;
+}
+
+async function endTake(cancel = false) {
+  const a = active;
+  active = null;
+  mode = 'armed';
+  const endT = performance.now();
+  await a.seg.stop();
+  const playSec = (a.lastLoud - a.trigger) / 1000;
+  if (cancel) return toast('✖ Take cancelled');
+  if (playSec < S.minTakeSec) return toast(`Too short (${playSec.toFixed(0)} s): dropped`);
+  const blob = new Blob(a.seg.chunks, { type: (mime || 'video/webm').split(';')[0] });
+  const take = { n: ++takeNo, dur: (endT - a.seg.t0) / 1000, size: blob.size, blob, star: false, status: 'pending' };
+  takes.unshift(take);
+  lastTake = take;
+  pending = { take, deadline: performance.now() + S.decideSec * 1000 };
+  renderTakes();
+}
+
+const pad = n => String(n).padStart(2, '0');
+const fname = t => `${sessionStamp}_take${pad(t.n)}${t.star ? '_best' : ''}.${ext}`;
+
+async function commit(take) {
+  if (pending?.take === take) pending = null;
+  if (take.status !== 'pending') return;
+  take.status = 'saving';
+  take.name = fname(take);
+  renderTakes();
+  try {
+    const r = await getRoot();
+    if (r) {
+      sessDir ??= await r.getDirectoryHandle(sessionStamp, { create: true });
+      const fh = await sessDir.getFileHandle(take.name, { create: true });
+      const w = await fh.createWritable();
+      await w.write(take.blob);
+      await w.close();
+      take.handle = fh;
+      take.status = 'saved';
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(take.blob);
+      a.download = take.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+      take.status = 'downloaded';
+    }
+    take.blob = null;
+    if (take.status === 'saved' && fname(take) !== take.name) await rename(take);  // starred while saving
+  } catch (e) {
+    take.status = 'error';
+    toast('Save failed: ' + e.message);
+  }
+  renderTakes();
+}
+
+async function rename(take) {
+  const newName = fname(take);
+  try {
+    if (take.handle.move) await take.handle.move(newName);
+    else throw new Error('no move');
+  } catch {
+    const file = await take.handle.getFile();
+    const fh = await sessDir.getFileHandle(newName, { create: true });
+    const w = await fh.createWritable();
+    await w.write(file);
+    await w.close();
+    await sessDir.removeEntry(take.name);
+    take.handle = fh;
+  }
+  take.name = newName;
+}
+
+async function discard(take) {
+  if (pending?.take === take) pending = null;
+  if (take.status === 'pending') {
+    take.blob = null;
+    take.status = 'discarded';
+  } else if (take.status === 'saved') {
+    try { await sessDir.removeEntry(take.name); take.status = 'discarded'; take.handle = null; }
+    catch (e) { return toast('Delete failed: ' + e.message); }
+  } else if (take.status === 'downloaded') {
+    return toast(`Take ${take.n} already downloaded: delete it manually`);
+  } else return;
+  toast(`🗑 Take ${take.n} discarded`);
+  renderTakes();
+}
+
+async function setStar(take, val) {
+  if (take.star === val) return;
+  take.star = val;
+  renderTakes();
+  if (take.status === 'saved') {
+    try { await rename(take); } catch (e) { toast('Rename failed: ' + e.message); }
+    renderTakes();
+  }
+}
+
+// ---------- actions (gestures, keys, pedal) ----------
+const target = () => pending?.take ||
+  (lastTake && ['pending', 'saving', 'saved', 'downloaded'].includes(lastTake.status) ? lastTake : null);
+
+function actBest() {
+  if (mode === 'recording' || mode === 'idle') return;
+  const t = target();
+  if (!t) return;
+  setStar(t, true);
+  if (t.status === 'pending') commit(t);
+  toast(`★ Take ${t.n} marked best`);
+}
+function actDiscard() {
+  if (mode === 'recording') return endTake(true);
+  if (mode === 'idle') return;
+  const t = target();
+  if (t) discard(t);
+}
+function actPause() {
+  if (mode === 'armed') { mode = 'paused'; dropSegs(); aboveSince = 0; toast('⏸ Paused'); }
+  else if (mode === 'paused') { mode = 'armed'; toast('▶ Listening'); }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, select, textarea')) return;
+  if (!$('library').hidden || !$('player').hidden) return;
+  const k = e.key;
+  if (['PageDown', 'ArrowRight', 'ArrowDown', 'Enter', ' '].includes(k)) { e.preventDefault(); actBest(); }
+  else if (['PageUp', 'ArrowLeft', 'ArrowUp', 'Backspace', 'Delete'].includes(k)) { e.preventDefault(); actDiscard(); }
+  else if (k === 'p' || k === 'P' || k === 'Escape') actPause();
+});
+
+// ---------- gestures ----------
+let recognizer = null;
+const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const MODEL = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
+const ICON = { Thumb_Up: '👍', Thumb_Down: '👎', Open_Palm: '✋' };
+
+async function loadGestures() {
+  $('gstatus').textContent = 'loading gesture model…';
+  try {
+    const v = await import(`${MP}/vision_bundle.mjs`);
+    const files = await v.FilesetResolver.forVisionTasks(`${MP}/wasm`);
+    for (const delegate of ['GPU', 'CPU']) {
+      try {
+        recognizer = await v.GestureRecognizer.createFromOptions(files, {
+          baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: 'VIDEO', numHands: 2 });
+        break;
+      } catch (e) { if (delegate === 'CPU') throw e; }
+    }
+    $('gstatus').textContent = 'gestures ready';
+  } catch (e) {
+    $('gstatus').textContent = 'gestures unavailable (' + e.message + '): keys/pedal still work';
+  }
+}
+
+function holdMs(name) {
+  if (name === 'Thumb_Up') return mode === 'recording' ? 0 : 600;
+  if (name === 'Thumb_Down') return mode === 'recording' ? 1500 : 600;
+  if (name === 'Open_Palm') return mode === 'recording' ? 0 : 1000;
+  return 0;
+}
+
+let gCur = 'None', gSince = 0, gFired = false, gMiss = 0;
+function gestureTick() {
+  const video = $('preview');
+  if (!recognizer || !S.gestures || mode === 'idle' || video.readyState < 2) return showGesture(null);
+  const now = performance.now();
+  let best = null, res;
+  try { res = recognizer.recognizeForVideo(video, now); } catch { return; }
+  for (const hand of res.gestures || []) {
+    const g = hand[0];
+    if (g && g.score > 0.6 && g.categoryName !== 'None' && (!best || g.score > best.score)) best = g;
+  }
+  const name = best ? best.categoryName : 'None';
+  if (name !== gCur) {
+    if (++gMiss < 2) return;      // tolerate a single dropped frame
+    gCur = name; gSince = now; gFired = false;
+  }
+  gMiss = 0;
+  const need = holdMs(gCur);
+  if (!need) return showGesture(null);
+  const p = Math.min(1, (now - gSince) / need);
+  showGesture(gCur, p);
+  if (p >= 1 && !gFired) {
+    gFired = true;
+    ({ Thumb_Up: actBest, Thumb_Down: actDiscard, Open_Palm: actPause })[gCur]();
+  }
+}
+function showGesture(name, p = 0) {
+  $('gesture').innerHTML = name
+    ? `${ICON[name]}<div class="bar"><div style="width:${(p * 100).toFixed(0)}%"></div></div>` : '';
+}
+
+// ---------- main loop ----------
+function tick() {
+  const now = performance.now();
+  if (analyser) {
+    analyser.getFloatTimeDomainData(buf);
+    let s = 0;
+    for (const v of buf) s += v * v;
+    const rms = Math.sqrt(s / buf.length);
+    levelDb = rms > 0 ? 20 * Math.log10(rms) : -100;
+  }
+  if (mode === 'armed') {
+    rotate(now);
+    if (levelDb > S.thresholdDb) {
+      aboveSince ||= now;
+      if (now - aboveSince >= 250) startTake(now);
+    } else aboveSince = 0;
+  } else if (mode === 'recording') {
+    if (levelDb > S.thresholdDb - 6) active.lastLoud = now;   // hysteresis keeps soft passages in
+    if (now - active.lastLoud > S.silenceSec * 1000) endTake();
+  }
+  if (pending && now >= pending.deadline) commit(pending.take);
+  render(now);
+}
+
+// ---------- UI ----------
+const pct = db => Math.max(0, Math.min(100, (db + 80) / 80 * 100));
+const mmss = s => `${Math.floor(s / 60)}:${pad(Math.floor(s % 60))}`;
+const mb = bytes => (bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0) + ' MB';
+
+function render(now) {
+  $('level').style.height = pct(levelDb) + '%';
+  $('level').style.background = levelDb > S.thresholdDb ? 'var(--red)' : 'var(--green)';
+  $('thr').style.bottom = pct(S.thresholdDb) + '%';
+  const b = $('banner');
+  let cls = mode, html;
+  if (mode === 'recording') {
+    const quiet = (now - active.lastLoud) / 1000;
+    html = `● REC take ${takeNo + 1} · ${mmss((now - active.seg.t0) / 1000)}` +
+      `<small>${quiet > 1 ? `silence… ends in ${Math.ceil(S.silenceSec - quiet)} s` : 'hold 👎 to cancel'}</small>`;
+  } else if (pending) {
+    cls = 'pending';
+    html = `Take ${pending.take.n}${pending.take.star ? ' ★' : ''}: keeping in ${Math.ceil((pending.deadline - now) / 1000)}` +
+      `<small>👎 discard · 👍 best · or just play the next take</small>`;
+  } else if (mode === 'armed') {
+    html = `READY: just play<small>${lastTake ? `last: take ${lastTake.n} ${lastTake.status}` : 'recording starts when you play'} · ✋ to pause</small>`;
+  } else if (mode === 'paused') {
+    html = `PAUSED<small>✋ hold or P to resume listening</small>`;
+  } else {
+    html = `Press “Start session”<small>one click, then hands-free</small>`;
+  }
+  b.className = cls;
+  if (b.innerHTML !== html) b.innerHTML = html;
+}
+
+function renderTakes() {
+  $('takes').innerHTML = takes.map((t, i) => `
+    <li class="${t.status}">
+      <span class="n">#${pad(t.n)}</span>
+      <span class="info">${mmss(t.dur)} · ${mb(t.size)} · ${t.status}</span>
+      ${t.status === 'discarded' ? '' : `
+        <button data-i="${i}" data-a="star" class="${t.star ? 'star' : ''}">${t.star ? '★' : '☆'}</button>
+        <button data-i="${i}" data-a="del">🗑</button>`}
+    </li>`).join('');
+  const kept = takes.filter(t => t.status !== 'discarded');
+  const sum = a => a.reduce((s, t) => s + t.size, 0);
+  $('stats').textContent = takes.length
+    ? `kept ${kept.length} (${mb(sum(kept))}) · discarded ${takes.length - kept.length} (${mb(sum(takes.filter(t => t.status === 'discarded')))} saved)` : '';
+}
+$('takes').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  btn.blur();
+  const t = takes[btn.dataset.i];
+  if (btn.dataset.a === 'star') setStar(t, !t.star);
+  else discard(t);
+});
+
+let toastTimer;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ---------- library: all sessions, play / share / download / delete ----------
+let libItems = [];
+const sessLabel = s => `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)} ${s.slice(9, 11)}:${s.slice(11, 13)}`;
+
+async function renderLibrary() {
+  const r = await getRoot();
+  if (!r) { $('libList').innerHTML = '<p class="help">This browser has no app storage: takes are downloaded instead.</p>'; return; }
+  const sessions = [];
+  for await (const [name, h] of r.entries()) if (h.kind === 'directory' && SESSION_RE.test(name)) sessions.push({ name, h, files: [] });
+  sessions.sort((a, b) => b.name.localeCompare(a.name));
+  for (const s of sessions) {
+    for await (const [name, h] of s.h.entries()) {
+      if (h.kind === 'file') s.files.push({ name, h, dir: s.h, file: await h.getFile() });
+    }
+    s.files.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  libItems = [];
+  const ref = item => libItems.push(item) - 1;
+  $('libList').innerHTML = sessions.length ? sessions.map(s => {
+    const si = ref({ kind: 'session', ...s });
+    const total = s.files.reduce((n, f) => n + f.file.size, 0);
+    return `<section class="sess">
+      <div class="shead"><b>${sessLabel(s.name)}${s.name === sessionStamp ? ' (current)' : ''}</b>
+        <span class="help">${s.files.length} takes · ${mb(total)}</span>
+        <button data-li="${si}" data-a="shareAll">⤴ All</button>
+        <button data-li="${si}" data-a="shareBest" class="star">⤴ ★</button>
+        <button data-li="${si}" data-a="delSess">🗑</button></div>
+      <ul class="takes">${s.files.map(f => {
+        const fi = ref({ kind: 'file', ...f });
+        const best = f.name.includes('_best');
+        const label = f.name.replace(`${s.name}_`, '').replace(/\.\w+$/, '').replace('_best', '');
+        return `<li><span class="n">${label}${best ? ' <span class="star">★</span>' : ''}</span>
+          <span class="info">${mb(f.file.size)}</span>
+          <button data-li="${fi}" data-a="play">▶</button>
+          <button data-li="${fi}" data-a="share">⤴</button>
+          <button data-li="${fi}" data-a="save">⬇</button>
+          <button data-li="${fi}" data-a="del">🗑</button></li>`;
+      }).join('')}</ul></section>`;
+  }).join('') : '<p class="help">No sessions yet.</p>';
+
+  if (rootPicked) $('usage').textContent = '📁 ' + r.name;
+  else {
+    const est = await navigator.storage.estimate?.();
+    const kept = await navigator.storage.persisted?.();
+    $('usage').textContent = est ? `using ${mb(est.usage)} of ${(est.quota / 1e9).toFixed(0)} GB` +
+      (kept ? ' · protected from auto-cleanup' : ' · not protected: share takes you want to keep') : '';
+  }
+}
+
+const asFile = f => new File([f.file], f.name, { type: typeOf(f.name) });
+async function share(files) {
+  if (!files.length) return toast('Nothing to share');
+  const list = files.map(asFile);
+  if (!navigator.canShare?.({ files: list })) return toast('Sharing not supported here: use ⬇');
+  try { await navigator.share({ files: list, title: 'Takes' }); }
+  catch (e) { if (e.name !== 'AbortError') toast('Share failed: ' + e.message); }
+}
+
+$('libList').addEventListener('click', async e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const it = libItems[btn.dataset.li];
+  const a = btn.dataset.a;
+  if (a === 'play') {
+    $('playTitle').textContent = it.name;
+    $('playVideo').src = URL.createObjectURL(it.file);
+    $('player').hidden = false;
+  } else if (a === 'share') share([it]);
+  else if (a === 'shareAll') share(it.files);
+  else if (a === 'shareBest') share(it.files.filter(f => f.name.includes('_best')));
+  else if (a === 'save') {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(it.file);
+    link.download = it.name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+  } else if (a === 'del') {
+    if (!confirm(`Delete ${it.name}?`)) return;
+    await it.dir.removeEntry(it.name);
+    const t = takes.find(t => t.name === it.name);
+    if (t) { t.status = 'discarded'; renderTakes(); }
+    renderLibrary();
+  } else if (a === 'delSess') {
+    if (!confirm(`Delete the whole session ${sessLabel(it.name)} (${it.files.length} takes)?`)) return;
+    await root.removeEntry(it.name, { recursive: true });
+    if (it.name === sessionStamp) {
+      sessDir = null;
+      takes.forEach(t => { if (t.status === 'saved') t.status = 'discarded'; });
+      renderTakes();
+    }
+    renderLibrary();
+  }
+});
+
+$('btnLib').onclick = () => { $('library').hidden = false; renderLibrary(); };
+$('btnLibClose').onclick = () => { $('library').hidden = true; };
+$('btnPlayClose').onclick = () => {
+  const v = $('playVideo');
+  v.pause();
+  URL.revokeObjectURL(v.src);
+  v.removeAttribute('src');
+  $('player').hidden = true;
+};
+
+// ---------- settings form <-> S ----------
+for (const el of document.querySelectorAll('[data-key]')) {
+  const k = el.dataset.key;
+  if (el.type === 'checkbox') el.checked = !!S[k];
+  else if (el.tagName !== 'SELECT' || k === 'quality') el.value = S[k];
+  el.addEventListener('change', async () => {
+    S[k] = el.type === 'checkbox' ? el.checked : (el.type === 'range' || el.type === 'number') ? +el.value : el.value;
+    saveSettings();
+    showThr();
+    if (['camId', 'micId', 'quality'].includes(k)) {
+      try { await openStream(); } catch (e) { toast(e.message); }
+    }
+  });
+  if (el.type === 'range') el.addEventListener('input', () => { S[k] = +el.value; showThr(); });
+}
+const showThr = () => { $('thrVal').textContent = S.thresholdDb; };
+showThr();
+const lockDeviceInputs = on => ['camId', 'micId', 'quality', 'btnFolder'].forEach(id => { $(id).disabled = on; });
+
+$('btnCal').onclick = async () => {
+  await audioCtx?.resume();
+  toast('Calibrating: stay silent…');
+  let peak = -100;
+  const end = performance.now() + 3000;
+  while (performance.now() < end) {
+    peak = Math.max(peak, levelDb);
+    await new Promise(r => setTimeout(r, 50));
+  }
+  S.thresholdDb = Math.round(Math.max(-70, Math.min(-15, peak + 12)));
+  document.querySelector('[data-key=thresholdDb]').value = S.thresholdDb;
+  saveSettings(); showThr();
+  toast(`Noise floor ${peak.toFixed(0)} dBFS → threshold ${S.thresholdDb}`);
+};
+
+const requestWakeLock = async () => { try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {} };
+
+$('btnStart').onclick = async () => {
+  const btn = $('btnStart');
+  btn.blur();
+  if (mode === 'idle') {
+    if (!stream) return toast('No camera/microphone');
+    await audioCtx.resume();
+    const d = new Date();
+    sessionStamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_` +
+                   `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    sessDir = null;            // created on the first kept take, so empty sessions leave no folder
+    takeNo = 0;
+    takes = [];
+    lastTake = null;
+    renderTakes();
+    mode = 'armed';
+    lockDeviceInputs(true);
+    requestWakeLock();
+    btn.textContent = 'End session';
+    btn.className = '';
+  } else {
+    if (mode === 'recording') await endTake();
+    if (pending) await commit(pending.take);
+    dropSegs();
+    mode = 'idle';
+    lockDeviceInputs(false);
+    wakeLock?.release();
+    btn.textContent = 'Start session';
+    btn.className = 'primary';
+  }
+};
+
+$('btnPurge').onclick = async () => {
+  const victims = takes.filter(t => !t.star && (t.status === 'saved' || t.status === 'pending'));
+  if (!victims.length) return toast('Nothing to delete');
+  if (!confirm(`Delete ${victims.length} unstarred take(s)?`)) return;
+  for (const t of victims) await discard(t);
+};
+
+// Leaving the app (home button, share sheet, phone call) stops the camera: close out cleanly.
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'hidden') {
+    if (mode === 'recording') await endTake();
+    if (pending) await commit(pending.take);
+    if (mode === 'armed') dropSegs();
+  } else if (mode !== 'idle') requestWakeLock();
+});
+window.addEventListener('beforeunload', e => { if (pending || mode === 'recording') e.preventDefault(); });
+
+// ---------- boot ----------
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+getRoot().then(r => r ? showRoot() : ($('folderName').textContent = '⬇ takes will download'))
+  .catch(e => { $('folderName').textContent = '⬇ no app storage: ' + e.message; });
+try { await openStream(); } catch (e) { $('banner').innerHTML = `Camera/mic error<small>${e.message}</small>`; }
+setInterval(tick, 50);
+setInterval(gestureTick, 100);
+loadGestures();
+</script>
+</body>
+</html>
