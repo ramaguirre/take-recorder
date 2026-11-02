@@ -28,18 +28,19 @@ downloaded on first use and cached.
 
 | How you open the app | Takes go to | See them |
 |---|---|---|
-| PC, `.\serve.ps1` | a real folder, default `%USERPROFILE%\Videos\TakeRecorder` (`-Root` to change) | **🗂 Open in Explorer** |
+| PC, `.\serve.ps1` | a real folder you choose with **📁 Change folder…** (remembered; default `%USERPROFILE%\Videos\TakeRecorder`) | **🗂 Open in Explorer** |
 | PC, the GitHub Pages link | a folder you pick with **Choose folder…** (remembered), else app storage | the picked folder |
 | Phone | the app's private storage, not visible in the Files app | Library: ⤴ share, ⬇ copy to Downloads |
 
-A web page cannot open Explorer or learn a folder's full path; the PC helper
-(`take_server.py`, Python stdlib only) does both.
+A web page cannot open Explorer, show a folder picker that returns a full path, or learn a
+folder's location; the PC helper (`take_server.py`, Python stdlib only) does all three, and
+remembers the folder in `%APPDATA%\TakeRecorder\config.json`.
 
 ## Run locally (PC)
 
 ```powershell
 .\serve.ps1                                # http://localhost:8000
-.\serve.ps1 -Root "D:\Music\Takes"         # another folder
+.\serve.ps1 -Root "D:\Music\Takes"         # force a folder for this run
 ```
 
 Files: `index.html` (the whole app), `take_server.py` (PC helper), `sw.js` + `manifest.webmanifest`
