@@ -23,11 +23,17 @@
   button.primary { background: var(--green); color: #000; border: 0; font-weight: 600; }
   button.danger { background: var(--red); color: #fff; border: 0; }
   #where, #stats { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  #tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 1; }
+  #tools .spacer { flex: 1; }
   main { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 50px); }
   @media (max-width: 860px) {
     main { grid-template-columns: 1fr; height: auto; }
     #stage { height: 62vh; }
     aside { border-left: 0; }
+    /* phone: only logo + Start above the video; the rest sits just below it (moved by script) */
+    main > #tools { padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    main > #tools .spacer { display: none; }
+    main > #tools #stats { flex-basis: 100%; }
   }
 
   #stage { position: relative; background: #000; overflow: hidden; min-height: 300px; }
@@ -84,13 +90,15 @@
 <header>
   <h1>🎙 Take Recorder</h1>
   <button id="btnStart" class="primary">Start session</button>
-  <button id="btnLib">📂 Library</button>
-  <button id="btnReveal" hidden>🗂 Open in Explorer</button>
-  <button id="btnFolder" hidden>Choose folder…</button>
-  <button id="btnReconnect" hidden></button>
-  <span id="where"></span>
-  <span style="flex:1"></span>
-  <span id="stats"></span>
+  <div id="tools">
+    <button id="btnLib">📂 Library</button>
+    <button id="btnReveal" hidden>🗂 Open in Explorer</button>
+    <button id="btnFolder" hidden>Choose folder…</button>
+    <button id="btnReconnect" hidden></button>
+    <span id="where"></span>
+    <span class="spacer"></span>
+    <span id="stats"></span>
+  </div>
 </header>
 <main>
   <section id="stage">
@@ -1086,6 +1094,15 @@ document.addEventListener('visibilitychange', async () => {
   } else if (mode !== 'idle') requestWakeLock();
 });
 window.addEventListener('beforeunload', e => { if (pending || mode === 'recording') e.preventDefault(); });
+
+// Narrow screens: keep the header to logo + Start, and put the other tools under the video.
+const narrow = matchMedia('(max-width: 860px)');
+const placeTools = () => {
+  if (narrow.matches) $('stage').after($('tools'));
+  else $('btnStart').after($('tools'));
+};
+narrow.addEventListener('change', placeTools);
+placeTools();
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
