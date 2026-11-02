@@ -10,7 +10,7 @@
 <style>
   :root {
     --bg: #111316; --panel: #1b1e23; --line: #2c3038; --text: #e8e8e8; --muted: #8a9099;
-    --green: #2ecc71; --red: #e74c3c; --amber: #f39c12; --blue: #3498db; --grey: #555b66;
+    --green: #2ecc71; --red: #e74c3c; --amber: #f39c12; --blue: #3498db; --grey: #555b66; --wave: #5dade2;
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -19,9 +19,10 @@
   header h1 { font-size: 17px; margin: 0 12px 0 0; }
   button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
   button:hover { border-color: var(--muted); }
+  button:disabled { opacity: .45; cursor: default; }
   button.primary { background: var(--green); color: #000; border: 0; font-weight: 600; }
   button.danger { background: var(--red); color: #fff; border: 0; }
-  #folderName, #stats { color: var(--muted); font-size: 13px; }
+  #where, #stats { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
   main { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 50px); }
   @media (max-width: 860px) {
     main { grid-template-columns: 1fr; height: auto; }
@@ -44,17 +45,19 @@
   #meter { position: absolute; right: 16px; top: 120px; bottom: 20px; width: 18px; background: #fff2; border-radius: 4px; }
   #level { position: absolute; bottom: 0; left: 0; right: 0; background: var(--green); border-radius: 4px; }
   #thr { position: absolute; left: -6px; right: -6px; height: 2px; background: var(--amber); }
-  #toast { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); background: #000c; padding: 10px 18px; border-radius: 8px; font-size: 20px; opacity: 0; transition: opacity .3s; pointer-events: none; white-space: nowrap; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #000d; padding: 10px 18px; border-radius: 8px; font-size: 18px; opacity: 0; transition: opacity .3s; pointer-events: none; white-space: nowrap; z-index: 20; }
   #toast.show { opacity: 1; }
 
   aside { background: var(--panel); border-left: 1px solid var(--line); padding: 12px 16px; overflow-y: auto; }
   aside h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 8px 0; }
   .takes { list-style: none; padding: 0; margin: 0 0 10px; }
-  .takes li { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .takes li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
   .takes li .n { font-weight: 700; min-width: 36px; }
   .takes li .info { flex: 1; font-size: 13px; color: var(--muted); }
-  .takes li.discarded { opacity: .4; text-decoration: line-through; }
+  .takes li.discarded, .takes li.dropped { opacity: .45; }
+  .takes li.discarded .n { text-decoration: line-through; }
   .takes li button { padding: 4px 9px; }
+  .takes canvas.wave { flex-basis: 100%; width: 100%; height: 40px; cursor: pointer; }
   .star { color: var(--amber); }
   details { margin-top: 14px; }
   summary { cursor: pointer; color: var(--muted); }
@@ -66,12 +69,15 @@
 
   .overlay { position: fixed; inset: 0; background: var(--bg); z-index: 10; overflow-y: auto; padding: 12px 16px; }
   .overlay .head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-  .overlay .head h2 { margin: 0; flex: 1; font-size: 20px; }
+  .overlay .head h2 { margin: 0; flex: 1; font-size: 20px; overflow-wrap: anywhere; }
   .sess { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
   .sess .shead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .sess .shead b { flex: 1; }
   #player { display: flex; flex-direction: column; gap: 8px; }
-  #playVideo { width: 100%; max-height: 85vh; background: #000; }
+  #playVideo { width: 100%; max-height: 60vh; background: #000; }
+  #editWave { width: 100%; height: 110px; background: #0a0b0d; border-radius: 6px; touch-action: none; cursor: pointer; }
+  .trimbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .trimbar span { flex: 1; text-align: center; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -79,8 +85,10 @@
   <h1>🎙 Take Recorder</h1>
   <button id="btnStart" class="primary">Start session</button>
   <button id="btnLib">📂 Library</button>
+  <button id="btnReveal" hidden>🗂 Open in Explorer</button>
   <button id="btnFolder" hidden>Choose folder…</button>
-  <span id="folderName"></span>
+  <button id="btnReconnect" hidden></button>
+  <span id="where"></span>
   <span style="flex:1"></span>
   <span id="stats"></span>
 </header>
@@ -91,7 +99,6 @@
     <div id="meter"><div id="level"></div><div id="thr"></div></div>
     <div id="gesture"></div>
     <div id="gstatus"></div>
-    <div id="toast"></div>
   </section>
   <aside>
     <h2>This session</h2>
@@ -126,6 +133,8 @@
       <label>Pre-roll (s): you get between this and 2×</label><input type="number" min="1" max="15" step="1" data-key="prerollSec">
       <label>Minimum take, playing time (s)</label><input type="number" min="0" max="120" step="1" data-key="minTakeSec">
       <label>Decision window (s)</label><input type="number" min="1" max="30" step="1" data-key="decideSec">
+      <label><input type="checkbox" data-key="autoTrim"> Trim the silent tail of each take</label>
+      <label>Silence kept after the last note (s)</label><input type="number" min="0" max="10" step="0.5" data-key="tailKeepSec">
       <label><input type="checkbox" data-key="gestures"> Gesture control</label>
       <p class="help" id="fmt"></p>
     </details>
@@ -133,20 +142,36 @@
 </main>
 
 <div id="library" class="overlay" hidden>
-  <div class="head"><h2>📂 Library</h2><span id="usage" class="help"></span><button id="btnLibClose">Close</button></div>
+  <div class="head"><h2>📂 Library</h2><button id="btnLibReveal" hidden>🗂 Open in Explorer</button><button id="btnLibClose">Close</button></div>
+  <p id="usage" class="help"></p>
   <div id="libList"></div>
 </div>
 <div id="player" class="overlay" hidden>
   <div class="head"><h2 id="playTitle"></h2><button id="btnPlayClose">Close</button></div>
   <video id="playVideo" controls playsinline></video>
+  <canvas id="editWave"></canvas>
+  <div class="trimbar">
+    <button id="btnSetStart">⟦ Start here</button>
+    <span id="trimInfo"></span>
+    <button id="btnSetEnd">End here ⟧</button>
+  </div>
+  <div class="trimbar">
+    <button id="btnPreview">▶ Preview</button>
+    <button id="btnTrimReset">Reset</button>
+    <span></span>
+    <button id="btnTrimSave" class="primary" disabled>✂ Trim &amp; save</button>
+  </div>
+  <p class="help">Drag the amber handles, or tap the waveform to move the playhead and use the buttons.
+    Cuts are made without re-encoding: the start lands on the nearest earlier keyframe (up to 1 s before), the end is exact.</p>
 </div>
+<div id="toast"></div>
 
 <script type="module">
 const $ = id => document.getElementById(id);
 
 // ---------- settings ----------
 const DEFAULTS = { thresholdDb: -45, silenceSec: 5, prerollSec: 4, minTakeSec: 10, decideSec: 4,
-                   quality: '720', gestures: true, camId: '', micId: '' };
+                   autoTrim: true, tailKeepSec: 1.5, quality: '720', gestures: true, camId: '', micId: '' };
 const S = { ...DEFAULTS };
 try { Object.assign(S, JSON.parse(localStorage.getItem('takeRecorder') || '{}')); } catch {}
 const saveSettings = () => { try { localStorage.setItem('takeRecorder', JSON.stringify(S)); } catch {} };
@@ -166,35 +191,245 @@ let mode = 'idle';            // idle | armed | paused | recording
 let segs = [];                // rolling pre-roll recorders while armed
 let active = null;            // { seg, trigger, lastLoud }
 let pending = null;           // { take, deadline }
-let takes = [], lastTake = null, takeNo = 0;
-let root = null, rootPicked = false, sessDir = null, sessionStamp = '';
+let takes = [], lastTake = null, takeNo = 0, sessionStamp = '';
 let levelDb = -100, aboveSince = 0;
 let wakeLock = null;
 
 // ---------- storage ----------
-// Each session is a folder named with its start timestamp, inside either a folder the user
-// picked (desktop) or the app's private storage (phone / default).
+// A store keeps sessions (folders named YYYYMMDD_HHMMSS) of take files. Three kinds:
+//   pc     - the local helper (take_server.py) writes to a real folder and can open Explorer
+//   folder - a folder picked in the browser (desktop Chrome/Edge), remembered between visits
+//   app    - the browser's private app storage (phone, or desktop without the helper)
 const SESSION_RE = /^\d{8}_\d{6}$/;
+const API_HEADERS = { 'X-Take-Recorder': '1' };
+let store = null, waitingHandle = null;
 
-async function getRoot() {
-  if (root) return root;
+function httpStore(info) {
+  const api = async (path, opts = {}) => {
+    const r = await fetch('api/' + path, { ...opts, headers: API_HEADERS });
+    if (!r.ok) throw new Error(`${r.status} ${(await r.json().catch(() => ({}))).error || r.statusText}`);
+    return r;
+  };
+  const f = (s, n) => `file/${s}/${encodeURIComponent(n)}`;
+  return {
+    kind: 'pc', label: info.root,
+    list: async () => (await api('list')).json(),
+    read: async (s, n) => (await api(f(s, n))).blob(),
+    write: (s, n, blob) => api(f(s, n), { method: 'PUT', body: blob }),
+    remove: (s, n) => api(f(s, n), { method: 'DELETE' }),
+    rename: (s, a, b) => api(`rename/${s}/${encodeURIComponent(a)}?to=${encodeURIComponent(b)}`, { method: 'POST' }),
+    removeSession: s => api(`session/${s}`, { method: 'DELETE' }),
+    reveal: (s = '', n = '') => api(`reveal?session=${s}&name=${encodeURIComponent(n)}`, { method: 'POST' }),
+  };
+}
+
+function fsStore(dir, kind) {
+  const sess = (s, create = false) => dir.getDirectoryHandle(s, { create });
+  const put = async (d, n, blob) => {
+    const w = await (await d.getFileHandle(n, { create: true })).createWritable();
+    await w.write(blob);
+    await w.close();
+  };
+  return {
+    kind, label: dir.name,
+    async list() {
+      const out = [];
+      for await (const [s, h] of dir.entries()) {
+        if (h.kind !== 'directory' || !SESSION_RE.test(s)) continue;
+        const files = [];
+        for await (const [n, fh] of h.entries()) if (fh.kind === 'file') files.push({ name: n, size: (await fh.getFile()).size });
+        files.sort((a, b) => a.name.localeCompare(b.name));
+        out.push({ session: s, files });
+      }
+      return out.sort((a, b) => b.session.localeCompare(a.session));
+    },
+    read: async (s, n) => (await (await sess(s)).getFileHandle(n)).getFile(),
+    write: async (s, n, blob) => put(await sess(s, true), n, blob),
+    remove: async (s, n) => (await sess(s)).removeEntry(n),
+    async rename(s, a, b) {
+      const d = await sess(s), fh = await d.getFileHandle(a);
+      try { if (!fh.move) throw 0; await fh.move(b); }
+      catch { await put(d, b, await fh.getFile()); await d.removeEntry(a); }
+    },
+    removeSession: s => dir.removeEntry(s, { recursive: true }),
+  };
+}
+
+// remembered picked folder (IndexedDB can hold directory handles)
+function idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('takeRecorder', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbGet(k) {
+  try {
+    const db = await idb();
+    return await new Promise(res => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(); });
+  } catch { return undefined; }
+}
+async function idbSet(k, v) {
+  try {
+    const db = await idb();
+    await new Promise(res => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; });
+  } catch {}
+}
+
+async function appStore() {
   if (!navigator.storage?.getDirectory) return null;
   const opfs = await navigator.storage.getDirectory();
-  root = await opfs.getDirectoryHandle('takes', { create: true });
   try { await navigator.storage.persist?.(); } catch {}
-  return root;
+  return fsStore(await opfs.getDirectoryHandle('takes', { create: true }), 'app');
 }
-const showRoot = () => { $('folderName').textContent = rootPicked ? '📁 ' + root.name : '💾 app storage'; };
 
-if (window.showDirectoryPicker) $('btnFolder').hidden = false;
+async function initStore() {
+  try {
+    const r = await fetch('api/info', { headers: API_HEADERS });
+    if (r.ok && r.headers.get('Content-Type')?.includes('json')) { store = httpStore(await r.json()); return; }
+  } catch {}
+  const saved = window.showDirectoryPicker && await idbGet('folder');
+  if (saved) {
+    if (await saved.queryPermission({ mode: 'readwrite' }) === 'granted') { store = fsStore(saved, 'folder'); return; }
+    waitingHandle = saved;   // needs a click to re-grant access
+  }
+  store = await appStore();
+}
+
+async function reconnect() {
+  if (!waitingHandle) return;
+  if (await waitingHandle.requestPermission({ mode: 'readwrite' }) === 'granted') {
+    store = fsStore(waitingHandle, 'folder');
+    waitingHandle = null;
+  }
+  showWhere();
+}
+
+function showWhere() {
+  const k = store?.kind;
+  $('where').textContent = k === 'pc' ? `📁 ${store.label}` : k === 'folder' ? `📁 ${store.label}`
+    : k === 'app' ? '💾 in-app storage' : '⬇ takes will download';
+  $('btnReveal').hidden = $('btnLibReveal').hidden = k !== 'pc';
+  $('btnFolder').hidden = !window.showDirectoryPicker || k === 'pc';
+  $('btnFolder').textContent = k === 'folder' ? 'Change folder…' : 'Choose folder…';
+  $('btnReconnect').hidden = !waitingHandle;
+  if (waitingHandle) $('btnReconnect').textContent = `🔓 Reconnect 📁 ${waitingHandle.name}`;
+}
+
 $('btnFolder').onclick = async () => {
   try {
-    root = await showDirectoryPicker({ id: 'takes', mode: 'readwrite', startIn: 'videos' });
-    rootPicked = true;
-    sessDir = null;
-    showRoot();
+    const dir = await showDirectoryPicker({ id: 'takes', mode: 'readwrite', startIn: 'videos' });
+    store = fsStore(dir, 'folder');
+    waitingHandle = null;
+    idbSet('folder', dir);
+    showWhere();
   } catch {}
 };
+$('btnReconnect').onclick = reconnect;
+const reveal = (s, n) => store?.reveal?.(s, n).catch(e => toast('Could not open Explorer: ' + e.message));
+$('btnReveal').onclick = () => reveal(takes.some(t => t.status === 'saved') ? sessionStamp : '');
+$('btnLibReveal').onclick = () => reveal();
+
+// ---------- trimming (ffmpeg.wasm, stream copy: no re-encoding) ----------
+const FF_CORE = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
+let ffmpeg = null, ffQueue = Promise.resolve();
+
+async function getFFmpeg() {
+  if (ffmpeg) return ffmpeg;
+  const { FFmpeg } = await import('./vendor/ffmpeg/index.js');
+  const blobURL = async (url, type) => URL.createObjectURL(new Blob([await (await fetch(url)).arrayBuffer()], { type }));
+  const ff = new FFmpeg();
+  await ff.load({ coreURL: await blobURL(`${FF_CORE}/ffmpeg-core.js`, 'text/javascript'),
+                  wasmURL: await blobURL(`${FF_CORE}/ffmpeg-core.wasm`, 'application/wasm') });
+  return ffmpeg = ff;
+}
+
+function trimBlob(blob, name, start, end) {
+  const job = ffQueue.then(async () => {
+    const ff = await getFFmpeg();
+    const x = name.endsWith('.mp4') ? 'mp4' : 'webm';
+    const inp = 'in.' + x, out = 'out.' + x;
+    await ff.writeFile(inp, new Uint8Array(await blob.arrayBuffer()));
+    try {
+      const rc = await ff.exec([...(start > 0.05 ? ['-ss', start.toFixed(3)] : []), '-i', inp,
+        '-t', (end - start).toFixed(3), '-c', 'copy', '-avoid_negative_ts', 'make_zero',
+        ...(x === 'mp4' ? ['-movflags', '+faststart'] : []), out]);
+      if (rc !== 0) throw new Error('ffmpeg exit code ' + rc);
+      return new Blob([await ff.readFile(out)], { type: typeOf(name) });
+    } finally {
+      await ff.deleteFile(inp).catch(() => {});
+      await ff.deleteFile(out).catch(() => {});
+    }
+  });
+  ffQueue = job.catch(() => {});
+  return job;
+}
+
+// ---------- waveforms ----------
+const waveCache = new Map();
+let waveQueue = Promise.resolve();
+
+async function peaksOf(blob, n = 1200) {
+  const ab = await new OfflineAudioContext(1, 1, 8000).decodeAudioData(await blob.arrayBuffer());
+  const ch = ab.getChannelData(0);
+  const per = Math.max(1, Math.floor(ch.length / n));
+  const peaks = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let m = 0;
+    for (let j = i * per, e = Math.min(ch.length, j + per); j < e; j++) { const v = Math.abs(ch[j]); if (v > m) m = v; }
+    peaks[i] = m;
+  }
+  let max = 1e-4;
+  for (const p of peaks) if (p > max) max = p;
+  return { peaks: peaks.map(p => p / max), duration: ab.duration };
+}
+
+// one decode at a time, so opening a long Library does not swamp the phone
+function waveOf(session, name, size, getBlob) {
+  const key = `${session}/${name}/${size}`;
+  if (!waveCache.has(key)) {
+    const p = waveQueue.then(async () => peaksOf(await getBlob()));
+    waveQueue = p.catch(() => {});
+    waveCache.set(key, p.catch(() => null));
+  }
+  return waveCache.get(key);
+}
+
+function drawWave(cv, w, sel) {
+  const dpr = devicePixelRatio || 1;
+  const W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  if (!w) return;
+  g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--wave');
+  for (let x = 0; x < W; x++) {
+    const h = Math.max(1, w.peaks[Math.floor(x / W * w.peaks.length)] * H * 0.95);
+    g.fillRect(x, (H - h) / 2, 1, h);
+  }
+  if (!sel) return;
+  const xs = sel.start / w.duration * W, xe = sel.end / w.duration * W;
+  g.fillStyle = 'rgba(0,0,0,.65)';
+  g.fillRect(0, 0, xs, H);
+  g.fillRect(xe, 0, W - xe, H);
+  g.fillStyle = '#f39c12';
+  g.fillRect(xs - 1.5 * dpr, 0, 3 * dpr, H);
+  g.fillRect(xe - 1.5 * dpr, 0, 3 * dpr, H);
+  if (sel.playhead != null) {
+    g.fillStyle = '#fff';
+    g.fillRect(sel.playhead / w.duration * W - dpr / 2, 0, dpr, H);
+  }
+}
+
+const waveObserver = new IntersectionObserver(entries => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    waveObserver.unobserve(e.target);
+    const { s, n, size } = e.target.dataset;
+    waveOf(s, n, size, () => store.read(s, n)).then(w => drawWave(e.target, w));
+  }
+});
 
 // ---------- media ----------
 async function openStream() {
@@ -243,7 +478,8 @@ class Seg {
     this.t0 = performance.now();
     this.chunks = [];
     this.dropped = false;
-    this.rec = new MediaRecorder(stream, { mimeType: mime || undefined,
+    // a keyframe every second keeps later trims (stream copy) within 1 s of the chosen start
+    this.rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoKeyFrameIntervalDuration: 1000,
       videoBitsPerSecond: VBR[S.quality], audioBitsPerSecond: 192_000 });
     this.rec.ondataavailable = e => { if (!this.dropped && e.data.size) this.chunks.push(e.data); };
     this.done = new Promise(r => { this.rec.onstop = r; });
@@ -277,10 +513,17 @@ async function endTake(cancel = false) {
   const endT = performance.now();
   await a.seg.stop();
   const playSec = (a.lastLoud - a.trigger) / 1000;
-  if (cancel) return toast('✖ Take cancelled');
-  if (playSec < S.minTakeSec) return toast(`Too short (${playSec.toFixed(0)} s): dropped`);
+  const dur = (endT - a.seg.t0) / 1000;
+  const size = a.seg.chunks.reduce((n, c) => n + c.size, 0);
+  if (cancel || playSec < S.minTakeSec) {
+    const reason = cancel ? 'cancelled' : `too short (${playSec.toFixed(0)} s playing)`;
+    takes.unshift({ n: null, dur, size, status: 'dropped', reason });
+    renderTakes();
+    return toast(cancel ? '✖ Take cancelled' : `Too short: dropped`);
+  }
   const blob = new Blob(a.seg.chunks, { type: (mime || 'video/webm').split(';')[0] });
-  const take = { n: ++takeNo, dur: (endT - a.seg.t0) / 1000, size: blob.size, blob, star: false, status: 'pending' };
+  const take = { n: ++takeNo, session: sessionStamp, dur, size: blob.size, blob, star: false, status: 'pending',
+                 keepUntil: (a.lastLoud - a.seg.t0) / 1000 + S.tailKeepSec };
   takes.unshift(take);
   lastTake = take;
   pending = { take, deadline: performance.now() + S.decideSec * 1000 };
@@ -288,34 +531,36 @@ async function endTake(cancel = false) {
 }
 
 const pad = n => String(n).padStart(2, '0');
-const fname = t => `${sessionStamp}_take${pad(t.n)}${t.star ? '_best' : ''}.${ext}`;
+const fname = t => `${t.session}_take${pad(t.n)}${t.star ? '_best' : ''}.${ext}`;
 
 async function commit(take) {
   if (pending?.take === take) pending = null;
   if (take.status !== 'pending') return;
-  take.status = 'saving';
   take.name = fname(take);
+  let blob = take.blob;
+  if (S.autoTrim && store && take.keepUntil < take.dur - 0.5) {
+    take.status = 'trimming';
+    renderTakes();
+    try {
+      blob = await trimBlob(blob, take.name, 0, take.keepUntil);
+      take.trimmed = take.dur - take.keepUntil;
+      take.dur = take.keepUntil;
+    } catch (e) { toast('Tail trim skipped: ' + e.message); }
+  }
+  if (take.status === 'discarded') return;     // thrown away while trimming
+  take.status = 'saving';
+  take.size = blob.size;
   renderTakes();
   try {
-    const r = await getRoot();
-    if (r) {
-      sessDir ??= await r.getDirectoryHandle(sessionStamp, { create: true });
-      const fh = await sessDir.getFileHandle(take.name, { create: true });
-      const w = await fh.createWritable();
-      await w.write(take.blob);
-      await w.close();
-      take.handle = fh;
+    if (store) {
+      await store.write(take.session, take.name, blob);
       take.status = 'saved';
+      if (fname(take) !== take.name) await renameTake(take);   // starred while saving
     } else {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(take.blob);
-      a.download = take.name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+      download(blob, take.name);
       take.status = 'downloaded';
     }
     take.blob = null;
-    if (take.status === 'saved' && fname(take) !== take.name) await rename(take);  // starred while saving
   } catch (e) {
     take.status = 'error';
     toast('Save failed: ' + e.message);
@@ -323,30 +568,27 @@ async function commit(take) {
   renderTakes();
 }
 
-async function rename(take) {
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+}
+
+async function renameTake(take) {
   const newName = fname(take);
-  try {
-    if (take.handle.move) await take.handle.move(newName);
-    else throw new Error('no move');
-  } catch {
-    const file = await take.handle.getFile();
-    const fh = await sessDir.getFileHandle(newName, { create: true });
-    const w = await fh.createWritable();
-    await w.write(file);
-    await w.close();
-    await sessDir.removeEntry(take.name);
-    take.handle = fh;
-  }
+  await store.rename(take.session, take.name, newName);
   take.name = newName;
 }
 
 async function discard(take) {
   if (pending?.take === take) pending = null;
-  if (take.status === 'pending') {
+  if (take.status === 'pending' || take.status === 'trimming') {
     take.blob = null;
     take.status = 'discarded';
   } else if (take.status === 'saved') {
-    try { await sessDir.removeEntry(take.name); take.status = 'discarded'; take.handle = null; }
+    try { await store.remove(take.session, take.name); take.status = 'discarded'; }
     catch (e) { return toast('Delete failed: ' + e.message); }
   } else if (take.status === 'downloaded') {
     return toast(`Take ${take.n} already downloaded: delete it manually`);
@@ -360,14 +602,14 @@ async function setStar(take, val) {
   take.star = val;
   renderTakes();
   if (take.status === 'saved') {
-    try { await rename(take); } catch (e) { toast('Rename failed: ' + e.message); }
+    try { await renameTake(take); } catch (e) { toast('Rename failed: ' + e.message); }
     renderTakes();
   }
 }
 
 // ---------- actions (gestures, keys, pedal) ----------
-const target = () => pending?.take ||
-  (lastTake && ['pending', 'saving', 'saved', 'downloaded'].includes(lastTake.status) ? lastTake : null);
+const LIVE = ['pending', 'trimming', 'saving', 'saved', 'downloaded'];
+const target = () => pending?.take || (lastTake && LIVE.includes(lastTake.status) ? lastTake : null);
 
 function actBest() {
   if (mode === 'recording' || mode === 'idle') return;
@@ -486,6 +728,7 @@ function tick() {
 // ---------- UI ----------
 const pct = db => Math.max(0, Math.min(100, (db + 80) / 80 * 100));
 const mmss = s => `${Math.floor(s / 60)}:${pad(Math.floor(s % 60))}`;
+const mmssd = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
 const mb = bytes => (bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0) + ' MB';
 
 function render(now) {
@@ -514,18 +757,24 @@ function render(now) {
 }
 
 function renderTakes() {
-  $('takes').innerHTML = takes.map((t, i) => `
-    <li class="${t.status}">
+  $('takes').innerHTML = takes.map((t, i) => {
+    if (t.status === 'dropped') return `<li class="dropped"><span class="n">–</span><span class="info">${mmss(t.dur)} · ${t.reason}</span></li>`;
+    const extra = t.trimmed ? ` · tail −${t.trimmed.toFixed(0)} s` : '';
+    return `<li class="${t.status}">
       <span class="n">#${pad(t.n)}</span>
-      <span class="info">${mmss(t.dur)} · ${mb(t.size)} · ${t.status}</span>
+      <span class="info">${mmss(t.dur)} · ${mb(t.size)} · ${t.status}${extra}</span>
       ${t.status === 'discarded' ? '' : `
+        ${t.status === 'saved' ? `<button data-i="${i}" data-a="edit">✂</button>` : ''}
         <button data-i="${i}" data-a="star" class="${t.star ? 'star' : ''}">${t.star ? '★' : '☆'}</button>
         <button data-i="${i}" data-a="del">🗑</button>`}
-    </li>`).join('');
-  const kept = takes.filter(t => t.status !== 'discarded');
+    </li>`;
+  }).join('');
   const sum = a => a.reduce((s, t) => s + t.size, 0);
+  const kept = takes.filter(t => LIVE.includes(t.status));
+  const gone = takes.filter(t => t.status === 'discarded' || t.status === 'dropped');
+  const dropped = takes.filter(t => t.status === 'dropped').length;
   $('stats').textContent = takes.length
-    ? `kept ${kept.length} (${mb(sum(kept))}) · discarded ${takes.length - kept.length} (${mb(sum(takes.filter(t => t.status === 'discarded')))} saved)` : '';
+    ? `kept ${kept.length} (${mb(sum(kept))}) · discarded ${gone.length - dropped} · auto-dropped ${dropped} (${mb(sum(gone))} saved)` : '';
 }
 $('takes').addEventListener('click', e => {
   const btn = e.target.closest('button');
@@ -533,6 +782,7 @@ $('takes').addEventListener('click', e => {
   btn.blur();
   const t = takes[btn.dataset.i];
   if (btn.dataset.a === 'star') setStar(t, !t.star);
+  else if (btn.dataset.a === 'edit') openEditor(t.session, t.name);
   else discard(t);
 });
 
@@ -545,108 +795,197 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
 }
 
-// ---------- library: all sessions, play / share / download / delete ----------
+// ---------- library: all sessions, play / trim / share / download / delete ----------
 let libItems = [];
 const sessLabel = s => `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)} ${s.slice(9, 11)}:${s.slice(11, 13)}`;
 
 async function renderLibrary() {
-  const r = await getRoot();
-  if (!r) { $('libList').innerHTML = '<p class="help">This browser has no app storage: takes are downloaded instead.</p>'; return; }
-  const sessions = [];
-  for await (const [name, h] of r.entries()) if (h.kind === 'directory' && SESSION_RE.test(name)) sessions.push({ name, h, files: [] });
-  sessions.sort((a, b) => b.name.localeCompare(a.name));
-  for (const s of sessions) {
-    for await (const [name, h] of s.h.entries()) {
-      if (h.kind === 'file') s.files.push({ name, h, dir: s.h, file: await h.getFile() });
-    }
-    s.files.sort((a, b) => a.name.localeCompare(b.name));
-  }
+  if (!store) { $('libList').innerHTML = '<p class="help">This browser has no app storage: takes are downloaded instead.</p>'; return; }
+  let sessions;
+  try { sessions = await store.list(); } catch (e) { $('libList').textContent = 'Could not read the takes: ' + e.message; return; }
   libItems = [];
   const ref = item => libItems.push(item) - 1;
   $('libList').innerHTML = sessions.length ? sessions.map(s => {
     const si = ref({ kind: 'session', ...s });
-    const total = s.files.reduce((n, f) => n + f.file.size, 0);
+    const total = s.files.reduce((n, f) => n + f.size, 0);
     return `<section class="sess">
-      <div class="shead"><b>${sessLabel(s.name)}${s.name === sessionStamp ? ' (current)' : ''}</b>
+      <div class="shead"><b>${sessLabel(s.session)}${s.session === sessionStamp ? ' (current)' : ''}</b>
         <span class="help">${s.files.length} takes · ${mb(total)}</span>
+        ${store.kind === 'pc' ? `<button data-li="${si}" data-a="reveal">🗂</button>` : ''}
         <button data-li="${si}" data-a="shareAll">⤴ All</button>
         <button data-li="${si}" data-a="shareBest" class="star">⤴ ★</button>
         <button data-li="${si}" data-a="delSess">🗑</button></div>
       <ul class="takes">${s.files.map(f => {
-        const fi = ref({ kind: 'file', ...f });
-        const best = f.name.includes('_best');
-        const label = f.name.replace(`${s.name}_`, '').replace(/\.\w+$/, '').replace('_best', '');
-        return `<li><span class="n">${label}${best ? ' <span class="star">★</span>' : ''}</span>
-          <span class="info">${mb(f.file.size)}</span>
-          <button data-li="${fi}" data-a="play">▶</button>
+        const fi = ref({ kind: 'file', session: s.session, ...f });
+        const label = f.name.replace(`${s.session}_`, '').replace(/\.\w+$/, '').replace('_best', '');
+        return `<li><span class="n">${label}${f.name.includes('_best') ? ' <span class="star">★</span>' : ''}</span>
+          <span class="info">${mb(f.size)}</span>
+          <button data-li="${fi}" data-a="play" title="play and trim">▶ ✂</button>
           <button data-li="${fi}" data-a="share">⤴</button>
           <button data-li="${fi}" data-a="save">⬇</button>
-          <button data-li="${fi}" data-a="del">🗑</button></li>`;
+          <button data-li="${fi}" data-a="del">🗑</button>
+          <canvas class="wave" data-li="${fi}" data-a="play" data-s="${s.session}" data-n="${f.name}" data-size="${f.size}"></canvas></li>`;
       }).join('')}</ul></section>`;
   }).join('') : '<p class="help">No sessions yet.</p>';
+  document.querySelectorAll('#libList canvas.wave').forEach(c => waveObserver.observe(c));
 
-  if (rootPicked) $('usage').textContent = '📁 ' + r.name;
+  if (store.kind === 'pc') $('usage').textContent = `Saved in ${store.label}`;
+  else if (store.kind === 'folder') $('usage').textContent = `Saved in the folder “${store.label}” you picked.`;
   else {
     const est = await navigator.storage.estimate?.();
     const kept = await navigator.storage.persisted?.();
-    $('usage').textContent = est ? `using ${mb(est.usage)} of ${(est.quota / 1e9).toFixed(0)} GB` +
-      (kept ? ' · protected from auto-cleanup' : ' · not protected: share takes you want to keep') : '';
+    $('usage').textContent = 'Takes are stored inside the app, not in a folder you can browse (e.g. the phone\'s Files app): ' +
+      'use ⤴ to share or ⬇ to copy a take to Downloads. ' +
+      (est ? `Using ${mb(est.usage)} of ${(est.quota / 1e9).toFixed(0)} GB` : '') +
+      (kept ? ' · protected from auto-cleanup.' : ' · not protected from auto-cleanup: share takes you want to keep.');
   }
 }
 
-const asFile = f => new File([f.file], f.name, { type: typeOf(f.name) });
 async function share(files) {
   if (!files.length) return toast('Nothing to share');
-  const list = files.map(asFile);
+  // read before calling share(): the share sheet needs to open soon after the tap
+  const list = await Promise.all(files.map(async f => new File([await store.read(f.session, f.name)], f.name, { type: typeOf(f.name) })));
   if (!navigator.canShare?.({ files: list })) return toast('Sharing not supported here: use ⬇');
   try { await navigator.share({ files: list, title: 'Takes' }); }
   catch (e) { if (e.name !== 'AbortError') toast('Share failed: ' + e.message); }
 }
 
 $('libList').addEventListener('click', async e => {
-  const btn = e.target.closest('button');
-  if (!btn) return;
-  const it = libItems[btn.dataset.li];
-  const a = btn.dataset.a;
-  if (a === 'play') {
-    $('playTitle').textContent = it.name;
-    $('playVideo').src = URL.createObjectURL(it.file);
-    $('player').hidden = false;
-  } else if (a === 'share') share([it]);
-  else if (a === 'shareAll') share(it.files);
-  else if (a === 'shareBest') share(it.files.filter(f => f.name.includes('_best')));
-  else if (a === 'save') {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(it.file);
-    link.download = it.name;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
-  } else if (a === 'del') {
-    if (!confirm(`Delete ${it.name}?`)) return;
-    await it.dir.removeEntry(it.name);
-    const t = takes.find(t => t.name === it.name);
-    if (t) { t.status = 'discarded'; renderTakes(); }
-    renderLibrary();
-  } else if (a === 'delSess') {
-    if (!confirm(`Delete the whole session ${sessLabel(it.name)} (${it.files.length} takes)?`)) return;
-    await root.removeEntry(it.name, { recursive: true });
-    if (it.name === sessionStamp) {
-      sessDir = null;
-      takes.forEach(t => { if (t.status === 'saved') t.status = 'discarded'; });
+  const el = e.target.closest('[data-a]');
+  if (!el) return;
+  const it = libItems[el.dataset.li];
+  const a = el.dataset.a;
+  const filesOf = s => s.files.map(f => ({ session: s.session, ...f }));
+  try {
+    if (a === 'play') openEditor(it.session, it.name);
+    else if (a === 'share') await share([it]);
+    else if (a === 'shareAll') await share(filesOf(it));
+    else if (a === 'shareBest') await share(filesOf(it).filter(f => f.name.includes('_best')));
+    else if (a === 'save') download(await store.read(it.session, it.name), it.name);
+    else if (a === 'reveal') reveal(it.session);
+    else if (a === 'del') {
+      if (!confirm(`Delete ${it.name}?`)) return;
+      await store.remove(it.session, it.name);
+      const t = takes.find(t => t.name === it.name && t.session === it.session);
+      if (t) { t.status = 'discarded'; renderTakes(); }
+      renderLibrary();
+    } else if (a === 'delSess') {
+      if (!confirm(`Delete the whole session ${sessLabel(it.session)} (${it.files.length} takes)?`)) return;
+      await store.removeSession(it.session);
+      takes.forEach(t => { if (t.session === it.session && t.status === 'saved') t.status = 'discarded'; });
       renderTakes();
+      renderLibrary();
     }
-    renderLibrary();
-  }
+  } catch (err) { toast(err.message); }
 });
 
 $('btnLib').onclick = () => { $('library').hidden = false; renderLibrary(); };
 $('btnLibClose').onclick = () => { $('library').hidden = true; };
-$('btnPlayClose').onclick = () => {
+
+// ---------- player + trim editor ----------
+let ed = null;   // { session, name, blob, wave, start, end, previewing, raf, drag }
+
+async function openEditor(session, name) {
+  try {
+    const blob = await store.read(session, name);
+    const v = $('playVideo');
+    v.src = URL.createObjectURL(blob);
+    $('playTitle').textContent = name;
+    $('player').hidden = false;
+    ed = { session, name, blob, wave: null, start: 0, end: 0, previewing: false };
+    $('trimInfo').textContent = 'reading audio…';
+    ed.wave = await waveOf(session, name, blob.size, () => blob);
+    if (!ed) return;
+    ed.end = ed.wave?.duration || v.duration || 0;
+    edLoop();
+  } catch (e) { toast('Could not open: ' + e.message); }
+}
+
+function edLoop() {
+  if (!ed) return;
+  const v = $('playVideo');
+  if (ed.previewing && v.currentTime >= ed.end) { v.pause(); ed.previewing = false; }
+  drawWave($('editWave'), ed.wave, { start: ed.start, end: ed.end, playhead: v.currentTime });
+  const full = ed.wave?.duration || 0;
+  const changed = ed.start > 0.05 || ed.end < full - 0.05;
+  $('trimInfo').textContent = `${mmssd(ed.start)} → ${mmssd(ed.end)}  (${mmssd(ed.end - ed.start)} of ${mmssd(full)})`;
+  $('btnTrimSave').disabled = !changed;
+  ed.raf = requestAnimationFrame(edLoop);
+}
+
+function closeEditor() {
+  if (ed) cancelAnimationFrame(ed.raf);
   const v = $('playVideo');
   v.pause();
-  URL.revokeObjectURL(v.src);
+  if (v.src) URL.revokeObjectURL(v.src);
   v.removeAttribute('src');
+  ed = null;
   $('player').hidden = true;
+}
+
+const clampSel = () => {
+  const full = ed.wave?.duration || 0;
+  ed.start = Math.max(0, Math.min(ed.start, ed.end - 0.5));
+  ed.end = Math.min(full, Math.max(ed.end, ed.start + 0.5));
+};
+$('btnSetStart').onclick = () => { if (ed?.wave) { ed.start = $('playVideo').currentTime; clampSel(); } };
+$('btnSetEnd').onclick = () => { if (ed?.wave) { ed.end = $('playVideo').currentTime; clampSel(); } };
+$('btnTrimReset').onclick = () => { if (ed?.wave) { ed.start = 0; ed.end = ed.wave.duration; } };
+$('btnPreview').onclick = () => {
+  if (!ed) return;
+  const v = $('playVideo');
+  v.currentTime = ed.start;
+  ed.previewing = true;
+  v.play();
+};
+$('btnPlayClose').onclick = closeEditor;
+
+const cv = $('editWave');
+const timeAt = e => {
+  const r = cv.getBoundingClientRect();
+  return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (ed.wave?.duration || 0);
+};
+cv.addEventListener('pointerdown', e => {
+  if (!ed?.wave) return;
+  const r = cv.getBoundingClientRect();
+  const px = t => r.left + t / ed.wave.duration * r.width;
+  const grab = Math.max(14, r.width * 0.02);
+  ed.drag = Math.abs(e.clientX - px(ed.start)) < grab ? 'start' : Math.abs(e.clientX - px(ed.end)) < grab ? 'end' : 'head';
+  cv.setPointerCapture(e.pointerId);
+  cv.dispatchEvent(new PointerEvent('pointermove', e));
+});
+cv.addEventListener('pointermove', e => {
+  if (!ed?.drag) return;
+  const t = timeAt(e);
+  if (ed.drag === 'start') { ed.start = t; clampSel(); $('playVideo').currentTime = ed.start; }
+  else if (ed.drag === 'end') { ed.end = t; clampSel(); $('playVideo').currentTime = ed.end; }
+  else $('playVideo').currentTime = t;
+});
+cv.addEventListener('pointerup', () => { if (ed) ed.drag = null; });
+
+$('btnTrimSave').onclick = async () => {
+  if (!ed?.wave) return;
+  const { session, name, blob, start, end } = ed;
+  const btn = $('btnTrimSave');
+  btn.disabled = true;
+  btn.textContent = 'Trimming…';
+  try {
+    const out = await trimBlob(blob, name, start, end);
+    await store.write(session, name, out);
+    // the start lands on a keyframe, so measure what was really kept
+    const kept = (await waveOf(session, name, out.size, () => out))?.duration ?? end - start;
+    const early = kept - (end - start);
+    const t = takes.find(t => t.session === session && t.name === name);
+    if (t) { t.size = out.size; t.dur = kept; renderTakes(); }
+    toast(`✂ Saved ${mmssd(kept)}` + (early > 0.1 ? ` (starts ${early.toFixed(1)} s early, at a keyframe)` : '') +
+          ` · ${mb(blob.size - out.size)} freed`);
+    closeEditor();
+    if (!$('library').hidden) renderLibrary();
+  } catch (e) {
+    toast('Trim failed: ' + e.message);
+  } finally {
+    btn.textContent = '✂ Trim & save';
+  }
 };
 
 // ---------- settings form <-> S ----------
@@ -690,11 +1029,11 @@ $('btnStart').onclick = async () => {
   btn.blur();
   if (mode === 'idle') {
     if (!stream) return toast('No camera/microphone');
+    if (waitingHandle) await reconnect();     // the click lets the browser re-grant folder access
     await audioCtx.resume();
     const d = new Date();
     sessionStamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_` +
                    `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    sessDir = null;            // created on the first kept take, so empty sessions leave no folder
     takeNo = 0;
     takes = [];
     lastTake = null;
@@ -702,6 +1041,7 @@ $('btnStart').onclick = async () => {
     mode = 'armed';
     lockDeviceInputs(true);
     requestWakeLock();
+    if (S.autoTrim && store) getFFmpeg().catch(() => {});   // warm up the trimmer before the first take
     btn.textContent = 'End session';
     btn.className = '';
   } else {
@@ -717,7 +1057,7 @@ $('btnStart').onclick = async () => {
 };
 
 $('btnPurge').onclick = async () => {
-  const victims = takes.filter(t => !t.star && (t.status === 'saved' || t.status === 'pending'));
+  const victims = takes.filter(t => !t.star && ['saved', 'pending', 'trimming'].includes(t.status));
   if (!victims.length) return toast('Nothing to delete');
   if (!confirm(`Delete ${victims.length} unstarred take(s)?`)) return;
   for (const t of victims) await discard(t);
@@ -735,8 +1075,7 @@ window.addEventListener('beforeunload', e => { if (pending || mode === 'recordin
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-getRoot().then(r => r ? showRoot() : ($('folderName').textContent = '⬇ takes will download'))
-  .catch(e => { $('folderName').textContent = '⬇ no app storage: ' + e.message; });
+initStore().catch(() => {}).then(showWhere);
 try { await openStream(); } catch (e) { $('banner').innerHTML = `Camera/mic error<small>${e.message}</small>`; }
 setInterval(tick, 50);
 setInterval(gestureTick, 100);
