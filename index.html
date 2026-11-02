@@ -142,7 +142,7 @@
 </main>
 
 <div id="library" class="overlay" hidden>
-  <div class="head"><h2>📂 Library</h2><button id="btnLibReveal" hidden>🗂 Open in Explorer</button><button id="btnLibClose">Close</button></div>
+  <div class="head"><h2>📂 Library</h2><button id="btnLibFolder" hidden></button><button id="btnLibReveal" hidden>🗂 Open in Explorer</button><button id="btnLibClose">Close</button></div>
   <p id="usage" class="help"></p>
   <div id="libList"></div>
 </div>
@@ -220,6 +220,7 @@ function httpStore(info) {
     rename: (s, a, b) => api(`rename/${s}/${encodeURIComponent(a)}?to=${encodeURIComponent(b)}`, { method: 'POST' }),
     removeSession: s => api(`session/${s}`, { method: 'DELETE' }),
     reveal: (s = '', n = '') => api(`reveal?session=${s}&name=${encodeURIComponent(n)}`, { method: 'POST' }),
+    choose: async () => (await api('choose', { method: 'POST' })).json(),   // native picker, opened by the helper
   };
 }
 
@@ -311,21 +312,34 @@ function showWhere() {
   $('where').textContent = k === 'pc' ? `📁 ${store.label}` : k === 'folder' ? `📁 ${store.label}`
     : k === 'app' ? '💾 in-app storage' : '⬇ takes will download';
   $('btnReveal').hidden = $('btnLibReveal').hidden = k !== 'pc';
-  $('btnFolder').hidden = !window.showDirectoryPicker || k === 'pc';
-  $('btnFolder').textContent = k === 'folder' ? 'Change folder…' : 'Choose folder…';
+  for (const id of ['btnFolder', 'btnLibFolder']) {
+    $(id).hidden = k !== 'pc' && !window.showDirectoryPicker;
+    $(id).textContent = k === 'pc' || k === 'folder' ? '📁 Change folder…' : '📁 Choose folder…';
+  }
   $('btnReconnect').hidden = !waitingHandle;
   if (waitingHandle) $('btnReconnect').textContent = `🔓 Reconnect 📁 ${waitingHandle.name}`;
 }
 
-$('btnFolder').onclick = async () => {
+async function chooseFolder() {
+  if (mode !== 'idle') return toast('End the session before changing the folder');
   try {
-    const dir = await showDirectoryPicker({ id: 'takes', mode: 'readwrite', startIn: 'videos' });
-    store = fsStore(dir, 'folder');
-    waitingHandle = null;
-    idbSet('folder', dir);
+    if (store?.kind === 'pc') {
+      toast('Choose the folder in the window that just opened…');
+      const r = await store.choose();
+      if (!r.changed) return;
+      store.label = r.root;
+    } else {
+      const dir = await showDirectoryPicker({ id: 'takes', mode: 'readwrite', startIn: 'videos' });
+      store = fsStore(dir, 'folder');
+      waitingHandle = null;
+      idbSet('folder', dir);
+    }
     showWhere();
-  } catch {}
-};
+    toast('📁 Takes now go to ' + store.label);
+    if (!$('library').hidden) renderLibrary();
+  } catch (e) { if (e.name !== 'AbortError') toast('Could not change folder: ' + e.message); }
+}
+$('btnFolder').onclick = $('btnLibFolder').onclick = chooseFolder;
 $('btnReconnect').onclick = reconnect;
 const reveal = (s, n) => store?.reveal?.(s, n).catch(e => toast('Could not open Explorer: ' + e.message));
 $('btnReveal').onclick = () => reveal(takes.some(t => t.status === 'saved') ? sessionStamp : '');
